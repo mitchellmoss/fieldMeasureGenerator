@@ -171,19 +171,20 @@ const FlooringInstallationNotes = () => {
   }, [currentDateTime]);
 
   useEffect(() => {
+    if (uploadedImages.length === 0) { // Check if uploadedImages is empty
     initializeIndexedDB()
       .then((db) => {
-        // Retrieve uploaded images from IndexedDB
+        // IndexedDB initialized successfully, now fetch images
         const transaction = db.transaction(['images'], 'readonly');
         const objectStore = transaction.objectStore('images');
-        const request = objectStore.getAll();
-  
+        const request = objectStore.getAll(); // Fetch all images from the 'images' store
+    
         request.onsuccess = () => {
           const savedImages = request.result;
           const parsedImages = savedImages.map((image) => image.imageData).filter(Boolean);
-          setUploadedImages(parsedImages);
+          setUploadedImages(parsedImages); // Set the fetched images to state
         };
-  
+    
         request.onerror = (event) => {
           console.error('Error retrieving images from IndexedDB:', event.target.error);
         };
@@ -191,6 +192,7 @@ const FlooringInstallationNotes = () => {
       .catch((error) => {
         console.error('Error initializing IndexedDB:', error);
       });
+    }
   }, []);
 
   useEffect(() => {
