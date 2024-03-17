@@ -54,15 +54,21 @@ const useStyles = makeStyles((theme) => ({
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
-    },
-    modalContent: {
-      backgroundColor: theme.palette.background.paper,
-      border: '2px solid #000',
-      boxShadow: theme.shadows[5],
-      padding: theme.spacing(2, 4, 3),
-      maxWidth: '80%',
-      maxHeight: '80%',
-      overflowY: 'auto',
+      modalContent: {
+        backgroundColor: theme.palette.background.paper,
+        border: '2px solid #000',
+        boxShadow: theme.shadows[5],
+        padding: theme.spacing(2, 4, 3),
+        maxWidth: '80%',
+        maxHeight: '80vh',
+        display: 'flex',
+        flexDirection: 'column',
+      },
+      modalImageContainer: {
+        flexGrow: 1,
+        overflowY: 'auto',
+        marginBottom: theme.spacing(2),
+      },
     },
     image: {
       width: '100%',
@@ -144,16 +150,17 @@ const FlooringInstallationNotes = () => {
   
       request.onsuccess = () => {
         const db = request.result;
-        console.log('IndexedDB database opened successfully');
-        setDb(db);
+        console.log('IndexedDB database opened successfully');      setDb(db);
         resolve(db);
       };
   
       request.onupgradeneeded = (event) => {
         const db = event.target.result;
-        const objectStore = db.createObjectStore('images', { keyPath: 'id', autoIncrement: true });
-        objectStore.createIndex('imageData', 'imageData', { unique: false });
-        console.log('IndexedDB database created successfully');
+        if (!db.objectStoreNames.contains('images')) {
+          const objectStore = db.createObjectStore('images', { keyPath: 'id', autoIncrement: true });
+          objectStore.createIndex('imageData', 'imageData', { unique: false });
+          console.log('IndexedDB database created successfully');
+        }
       };
     });
   };
@@ -173,13 +180,7 @@ const FlooringInstallationNotes = () => {
   
         request.onsuccess = () => {
           const savedImages = request.result;
-          const parsedImages = savedImages.map((image) => {
-            if (typeof image.imageData === 'string' && image.imageData.startsWith('data:image')) {
-              return image.imageData;
-            }
-            console.warn('Invalid image data:', image.imageData);
-            return null;
-          }).filter(Boolean);
+          const parsedImages = savedImages.map((image) => image.imageData).filter(Boolean);
           setUploadedImages(parsedImages);
         };
   
@@ -253,69 +254,75 @@ const FlooringInstallationNotes = () => {
   const MAX_UPLOADED_IMAGES = 10; // Set the maximum number of allowed images
 
   const handleImageUpload = async (event) => {
-    const file = event.target.files[0];
-    if (file) {
+    const files = Array.from(event.target.files);
+    if (files.length > 0) {
       setIsLoading(true);
-      const fileType = file.type;
-      const isJPEG = fileType === 'image/jpeg';
-      const isPNG = fileType === 'image/png';
-      const isHEIC = fileType === 'image/heic';
   
-      if (isJPEG || isPNG) {
-        // Handle JPEG and PNG images
-        new Compressor(file, {
-          quality: 0.8,
-          maxWidth: 1000,
-          maxHeight: 1000,
-          success(result) {
-            const reader = new FileReader();
-            reader.onload = () => {
-              const imageDataURL = reader.result;
-              setSelectedImage(imageDataURL);
-        
-              if (uploadedImages.length >= MAX_UPLOADED_IMAGES) {
-                const updatedImages = [...uploadedImages.slice(1), imageDataURL];
-                setUploadedImages(updatedImages);
-                saveImagesToIndexedDB(updatedImages); // Save images to IndexedDB
-              } else {
-                const updatedImages = [...uploadedImages, imageDataURL];
-                setUploadedImages(updatedImages);
-                saveImagesToIndexedDB(updatedImages); // Save images to IndexedDB
-              }
-            };
-            reader.readAsDataURL(result);
-          },
-          error(err) {
-            console.error('Image compression error:', err);
-          },
-        });
-      } else if (isHEIC) {
-        try {
-          const blob = await fetch(URL.createObjectURL(file)).then((res) => res.blob());
-          const convertedImage = await heic2any({
-            blob,
-            toType: 'image/jpeg',
-            quality: 0.8,
+      const uploadPromises = files.map(async (file) => {
+        const fileType = file.type;
+        const isJPEG = fileType === 'image/jpeg';
+        const isPNG = fileType === 'image/png';
+        const isHEIC = fileType === 'image/heic';
+  
+        if (isJPEG || isPNG) {
+          // Handle JPEG and PNG images
+          return new Promise((resolve) => {
+            new Compressor(file, {
+              quality: 0.8,
+              maxWidth: 1000,
+              maxHeight: 1000,
+              success(result) {
+                const reader = new FileReader();
+                reader.onload = () => {
+                  const imageDataURL = reader.result;
+                  resolve(imageDataURL);
+                };
+                reader.readAsDataURL(result);
+              },
+              error(err) {
+                console.error('Image compression error:', err);
+                resolve(null);
+              },
+            });
           });
-          const imageDataURL = URL.createObjectURL(convertedImage);
-          setSelectedImage(imageDataURL);
+        } else if (isHEIC) {
+          // Handle HEIC images
+          try {
+            const blob = await fetch(URL.createObjectURL(file)).then((res) => res.blob());
+            const convertedImage = await heic2any({
+              blob,
+              toType: 'image/jpeg',
+              quality: 0.8,
+            });
+            const imageDataURL = URL.createObjectURL(convertedImage);
+            return imageDataURL;
+          } catch (error) {
+            console.error('Error converting HEIC image:', error);
+            return null;
+          }
+        } else {
+          console.error('Unsupported image format');
+          return null;
+        }
+      });
   
-          if (uploadedImages.length >= MAX_UPLOADED_IMAGES) {
-            const updatedImages = [...uploadedImages.slice(1), imageDataURL];
-            setUploadedImages(updatedImages);
-            saveImagesToIndexedDB(updatedImages);
-          } else {
-            const updatedImages = [...uploadedImages, imageDataURL];
+      Promise.all(uploadPromises)
+        .then((uploadedImages) => {
+          const validImages = uploadedImages.filter((image) => image !== null);
+          if (validImages.length > 0) {
+            setSelectedImage(validImages[validImages.length - 1]);
+  
+            // Update the uploadedImages state with only the new valid images
+            const updatedImages = validImages;
             setUploadedImages(updatedImages);
             saveImagesToIndexedDB(updatedImages);
           }
-        } catch (error) {
-          console.error('Error converting HEIC image:', error);
-        }
-      } else {
-        console.error('Unsupported image format');
-      }
-      setIsLoading(false); // Set loading state to false after upload is complete
+          setIsLoading(false);
+        })
+        .catch((error) => {
+          console.error('Error processing images:', error);
+          setIsLoading(false);
+        });
     }
   };
 
@@ -327,18 +334,28 @@ const FlooringInstallationNotes = () => {
       // Clear existing images
       objectStore.clear();
   
-      // Add new images
-      images.forEach((imageData) => {
-        objectStore.add({ imageData });
-      });
+      // Save new images
+      const addImage = (image) => {
+        return new Promise((resolve, reject) => {
+          const addRequest = objectStore.add({ imageData: image });
   
-      transaction.oncomplete = () => {
-        console.log('Images saved to IndexedDB');
+          addRequest.onsuccess = () => {
+            resolve();
+          };
+  
+          addRequest.onerror = (event) => {
+            reject(event.target.error);
+          };
+        });
       };
   
-      transaction.onerror = (event) => {
-        console.error('Error saving images to IndexedDB:', event.target.error);
-      };
+      Promise.all(images.map(addImage))
+        .then(() => {
+          console.log('Images saved to IndexedDB');
+        })
+        .catch((error) => {
+          console.error('Error saving images to IndexedDB:', error);
+        });
     }
   };
 
@@ -783,35 +800,37 @@ const FlooringInstallationNotes = () => {
     <Typography variant="h5" gutterBottom>
       Uploaded Images
     </Typography>
-    <GridList cellHeight={200} cols={isMobileView ? 1 : 3} spacing={10}>
-  {uploadedImages.map((image, index) => (
-    <GridListTile key={index}>
-      {image ? (
-        <img src={image} alt={`Uploaded ${index}`} className={classes.image} />
-      ) : (
-        <div className={classes.fallbackImage}>Image not available</div>
-      )}
-      <GridListTileBar
-        title={`Image ${index + 1}`}
-        actionIcon={
-          <IconButton
-            className={classes.icon}
-            onClick={() => handleImageDelete(index)}
-          >
-            <DeleteIcon />
-          </IconButton>
-        }
-      />
-    </GridListTile>
-  ))}
-</GridList>
+    <div style={{ flexGrow: 1, overflowY: 'auto' }}>
+      <GridList cellHeight={200} cols={isMobileView ? 1 : 3} spacing={10}>
+        {uploadedImages.map((image, index) => (
+          <GridListTile key={index}>
+            {image ? (
+              <img src={image} alt={`Uploaded ${index}`} className={classes.image} />
+            ) : (
+              <div className={classes.fallbackImage}>Image not available</div>
+            )}
+            <GridListTileBar
+              title={`Image ${index + 1}`}
+              actionIcon={
+                <IconButton
+                  className={classes.icon}
+                  onClick={() => handleImageDelete(index)}
+                >
+                  <DeleteIcon />
+                </IconButton>
+              }
+            />
+          </GridListTile>
+        ))}
+      </GridList>
+    </div>
     <div className={classes.modalButtons}>
       <Button variant="contained" color="primary" onClick={handleCloseModal}>
         Close
       </Button>
-            </div>
-          </div>
-        </Modal>
+    </div>
+  </div>
+</Modal>
       </>
     )}
   </div>
