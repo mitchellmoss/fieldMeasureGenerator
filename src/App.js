@@ -307,22 +307,22 @@ const FlooringInstallationNotes = () => {
       });
   
       Promise.all(uploadPromises)
-        .then((uploadedImages) => {
-          const validImages = uploadedImages.filter((image) => image !== null);
-          if (validImages.length > 0) {
-            setSelectedImage(validImages[validImages.length - 1]);
-  
-            // Update the uploadedImages state with only the new valid images
-            const updatedImages = validImages;
-            setUploadedImages(updatedImages);
-            saveImagesToIndexedDB(updatedImages);
-          }
-          setIsLoading(false);
-        })
-        .catch((error) => {
-          console.error('Error processing images:', error);
-          setIsLoading(false);
-        });
+      .then((newImages) => {
+        const validImages = newImages.filter((image) => image !== null);
+        if (validImages.length > 0) {
+          setSelectedImage(validImages[validImages.length - 1]);
+
+          // Append new valid images to the existing uploadedImages state
+          const updatedImages = [...uploadedImages, ...validImages];
+          setUploadedImages(updatedImages);
+          saveImagesToIndexedDB(updatedImages);
+        }
+        setIsLoading(false);
+      })
+      .catch((error) => {
+        console.error('Error processing images:', error);
+        setIsLoading(false);
+      });
     }
   };
 
@@ -331,19 +331,30 @@ const FlooringInstallationNotes = () => {
       const transaction = db.transaction(['images'], 'readwrite');
       const objectStore = transaction.objectStore('images');
   
-      // Clear existing images
-      objectStore.clear();
-  
       // Save new images
       const addImage = (image) => {
         return new Promise((resolve, reject) => {
-          const addRequest = objectStore.add({ imageData: image });
+          const getRequest = objectStore.get(image);
   
-          addRequest.onsuccess = () => {
-            resolve();
+          getRequest.onsuccess = () => {
+            const existingImage = getRequest.result;
+  
+            if (!existingImage) {
+              const addRequest = objectStore.add({ imageData: image });
+  
+              addRequest.onsuccess = () => {
+                resolve();
+              };
+  
+              addRequest.onerror = (event) => {
+                reject(event.target.error);
+              };
+            } else {
+              resolve();
+            }
           };
   
-          addRequest.onerror = (event) => {
+          getRequest.onerror = (event) => {
             reject(event.target.error);
           };
         });
