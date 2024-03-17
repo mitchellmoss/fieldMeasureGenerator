@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Modal, GridList, GridListTile, GridListTileBar, IconButton } from '@material-ui/core';
 import { makeStyles } from '@material-ui/core/styles';
 import { Grid } from '@material-ui/core';
-
+import Loader from './components/Loader';
 import {
   Card,
   CardContent,
@@ -76,9 +76,20 @@ const useStyles = makeStyles((theme) => ({
       marginTop: theme.spacing(2),
       textAlign: 'right',
     },
+    fallbackImage: {
+      display: 'flex',
+      justifyContent: 'center',
+      alignItems: 'center',
+      height: 200,
+      backgroundColor: '#f0f0f0',
+      color: '#888',
+    },
 
   },
 }));
+
+
+
 
 
 
@@ -105,6 +116,8 @@ const useCurrentDateTime = () => {
 };
 
 const FlooringInstallationNotes = () => {
+  const [isLoading, setIsLoading] = useState(false);
+  const [db, setDb] = useState(null);
   const [isMobileView, setIsMobileView] = useState(false);
   const classes = useStyles();
   const [jobAddress, setJobAddress] = useState('');
@@ -119,19 +132,85 @@ const FlooringInstallationNotes = () => {
   const [notes, setNotes] = useState('');
   const [flooringList, setFlooringList] = useState([]);
   const [editIndex, setEditIndex] = useState(-1);
+
+  const initializeIndexedDB = () => {
+    return new Promise((resolve, reject) => {
+      const request = window.indexedDB.open('FlooringInstallationNotesDB', 1);
+  
+      request.onerror = () => {
+        console.error('Failed to open IndexedDB database');
+        reject(request.error);
+      };
+  
+      request.onsuccess = () => {
+        const db = request.result;
+        console.log('IndexedDB database opened successfully');
+        setDb(db);
+        resolve(db);
+      };
+  
+      request.onupgradeneeded = (event) => {
+        const db = event.target.result;
+        const objectStore = db.createObjectStore('images', { keyPath: 'id', autoIncrement: true });
+        objectStore.createIndex('imageData', 'imageData', { unique: false });
+        console.log('IndexedDB database created successfully');
+      };
+    });
+  };
+
   const currentDateTime = useCurrentDateTime();
   useEffect(() => {
     setDateTime(currentDateTime);
   }, [currentDateTime]);
 
   useEffect(() => {
+    initializeIndexedDB()
+      .then((db) => {
+        // Retrieve uploaded images from IndexedDB
+        const transaction = db.transaction(['images'], 'readonly');
+        const objectStore = transaction.objectStore('images');
+        const request = objectStore.getAll();
+  
+        request.onsuccess = () => {
+          const savedImages = request.result;
+          const parsedImages = savedImages.map((image) => {
+            if (typeof image.imageData === 'string' && image.imageData.startsWith('data:image')) {
+              return image.imageData;
+            }
+            console.warn('Invalid image data:', image.imageData);
+            return null;
+          }).filter(Boolean);
+          setUploadedImages(parsedImages);
+        };
+  
+        request.onerror = (event) => {
+          console.error('Error retrieving images from IndexedDB:', event.target.error);
+        };
+      })
+      .catch((error) => {
+        console.error('Error initializing IndexedDB:', error);
+      });
+  }, []);
+
+  useEffect(() => {
     const savedJobAddress = localStorage.getItem('jobAddress');
     const savedDateTime = localStorage.getItem('dateTime');
     const savedFlooringList = JSON.parse(localStorage.getItem('flooringList'));
-
+  
     if (savedJobAddress) setJobAddress(savedJobAddress);
     if (savedDateTime) setDateTime(savedDateTime);
-    if (savedFlooringList) setFlooringList(savedFlooringList);
+    if (savedFlooringList) {
+      const parsedFlooringList = savedFlooringList.map((item) => ({
+        ...item,
+        dimensions: item.dimensions.map((dimension) => ({
+          lengthFeet: dimension.lengthFeet,
+          lengthInches: dimension.lengthInches,
+          widthFeet: dimension.widthFeet,
+          widthInches: dimension.widthInches,
+        })),
+      }));
+      setFlooringList(parsedFlooringList);
+    }
   }, []);
 
   useEffect(() => {
@@ -151,7 +230,7 @@ const FlooringInstallationNotes = () => {
     const updatedImages = [...uploadedImages];
     updatedImages.splice(index, 1);
     setUploadedImages(updatedImages);
-    localStorage.setItem('uploadedImages', JSON.stringify(updatedImages));
+    saveImagesToIndexedDB(updatedImages); // Save updated images to IndexedDB
   };
 
   const handleEdit = (index) => {
@@ -173,9 +252,10 @@ const FlooringInstallationNotes = () => {
 
   const MAX_UPLOADED_IMAGES = 10; // Set the maximum number of allowed images
 
-  const handleImageUpload = (event) => {
+  const handleImageUpload = async (event) => {
     const file = event.target.files[0];
     if (file) {
+      setIsLoading(true);
       const fileType = file.type;
       const isJPEG = fileType === 'image/jpeg';
       const isPNG = fileType === 'image/png';
@@ -192,15 +272,15 @@ const FlooringInstallationNotes = () => {
             reader.onload = () => {
               const imageDataURL = reader.result;
               setSelectedImage(imageDataURL);
-  
+        
               if (uploadedImages.length >= MAX_UPLOADED_IMAGES) {
                 const updatedImages = [...uploadedImages.slice(1), imageDataURL];
                 setUploadedImages(updatedImages);
-                localStorage.setItem('uploadedImages', JSON.stringify(updatedImages));
+                saveImagesToIndexedDB(updatedImages); // Save images to IndexedDB
               } else {
                 const updatedImages = [...uploadedImages, imageDataURL];
                 setUploadedImages(updatedImages);
-                localStorage.setItem('uploadedImages', JSON.stringify(updatedImages));
+                saveImagesToIndexedDB(updatedImages); // Save images to IndexedDB
               }
             };
             reader.readAsDataURL(result);
@@ -210,26 +290,55 @@ const FlooringInstallationNotes = () => {
           },
         });
       } else if (isHEIC) {
-        // Handle HEIC images
-        const reader = new FileReader();
-        reader.onload = () => {
-          const imageDataURL = reader.result;
+        try {
+          const blob = await fetch(URL.createObjectURL(file)).then((res) => res.blob());
+          const convertedImage = await heic2any({
+            blob,
+            toType: 'image/jpeg',
+            quality: 0.8,
+          });
+          const imageDataURL = URL.createObjectURL(convertedImage);
           setSelectedImage(imageDataURL);
   
           if (uploadedImages.length >= MAX_UPLOADED_IMAGES) {
             const updatedImages = [...uploadedImages.slice(1), imageDataURL];
             setUploadedImages(updatedImages);
-            localStorage.setItem('uploadedImages', JSON.stringify(updatedImages));
+            saveImagesToIndexedDB(updatedImages);
           } else {
             const updatedImages = [...uploadedImages, imageDataURL];
             setUploadedImages(updatedImages);
-            localStorage.setItem('uploadedImages', JSON.stringify(updatedImages));
+            saveImagesToIndexedDB(updatedImages);
           }
-        };
-        reader.readAsDataURL(file);
+        } catch (error) {
+          console.error('Error converting HEIC image:', error);
+        }
       } else {
         console.error('Unsupported image format');
       }
+      setIsLoading(false); // Set loading state to false after upload is complete
+    }
+  };
+
+  const saveImagesToIndexedDB = (images) => {
+    if (db) {
+      const transaction = db.transaction(['images'], 'readwrite');
+      const objectStore = transaction.objectStore('images');
+  
+      // Clear existing images
+      objectStore.clear();
+  
+      // Add new images
+      images.forEach((imageData) => {
+        objectStore.add({ imageData });
+      });
+  
+      transaction.oncomplete = () => {
+        console.log('Images saved to IndexedDB');
+      };
+  
+      transaction.onerror = (event) => {
+        console.error('Error saving images to IndexedDB:', event.target.error);
+      };
     }
   };
 
@@ -241,10 +350,7 @@ const FlooringInstallationNotes = () => {
     setOpenModal(false);
   };
 
-  useEffect(() => {
-    const savedUploadedImages = JSON.parse(localStorage.getItem('uploadedImages'));
-    if (savedUploadedImages) setUploadedImages(savedUploadedImages);
-  }, []);
+  
 
   const addUpdateList = () => {
     const newItem = {
@@ -438,7 +544,11 @@ const FlooringInstallationNotes = () => {
       setJobAddress('');
       setDateTime('');
       setFlooringList([]);
-      setUploadedImages([]);
+      if (db) {
+        const transaction = db.transaction(['images'], 'readwrite');
+        const objectStore = transaction.objectStore('images');
+        objectStore.clear();
+      }
     }
   };
 
@@ -447,6 +557,11 @@ const FlooringInstallationNotes = () => {
       <Typography variant="h4" gutterBottom>
         Flooring Installation Notes
       </Typography>
+  
+      {isLoading ? (
+        <Loader />
+      ) : (
+        <>
   
       <Card>
         <CardContent>
@@ -561,7 +676,7 @@ const FlooringInstallationNotes = () => {
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
                 multiline
-                rows={4}
+                minRows={4}
                 fullWidth
                 margin="dense"
               />
@@ -659,7 +774,7 @@ const FlooringInstallationNotes = () => {
       </Card>
     ))}
     
-<Modal
+    <Modal
   className={classes.modal}
   open={openModal}
   onClose={handleCloseModal}
@@ -669,30 +784,36 @@ const FlooringInstallationNotes = () => {
       Uploaded Images
     </Typography>
     <GridList cellHeight={200} cols={isMobileView ? 1 : 3} spacing={10}>
-      {uploadedImages.map((image, index) => (
-        <GridListTile key={index}>
-          <img src={image} alt={`Uploaded ${index}`} className={classes.image} />
-          <GridListTileBar
-            title={`Image ${index + 1}`}
-            actionIcon={
-              <IconButton
-                className={classes.icon}
-                onClick={() => handleImageDelete(index)}
-              >
-                <DeleteIcon />
-              </IconButton>
-            }
-          />
-        </GridListTile>
-      ))}
-    </GridList>
+  {uploadedImages.map((image, index) => (
+    <GridListTile key={index}>
+      {image ? (
+        <img src={image} alt={`Uploaded ${index}`} className={classes.image} />
+      ) : (
+        <div className={classes.fallbackImage}>Image not available</div>
+      )}
+      <GridListTileBar
+        title={`Image ${index + 1}`}
+        actionIcon={
+          <IconButton
+            className={classes.icon}
+            onClick={() => handleImageDelete(index)}
+          >
+            <DeleteIcon />
+          </IconButton>
+        }
+      />
+    </GridListTile>
+  ))}
+</GridList>
     <div className={classes.modalButtons}>
       <Button variant="contained" color="primary" onClick={handleCloseModal}>
         Close
       </Button>
-    </div>
-  </div>
-</Modal>
+            </div>
+          </div>
+        </Modal>
+      </>
+    )}
   </div>
 );
 };
