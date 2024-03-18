@@ -1,27 +1,22 @@
 import React, { useState, useEffect } from 'react';
-import { Modal, GridList, GridListTile, GridListTileBar, IconButton } from '@material-ui/core';
+import { Modal, IconButton, Typography, Button, TextField } from '@material-ui/core';
 import { makeStyles } from '@material-ui/core/styles';
 import { Grid } from '@material-ui/core';
 import Loader from './components/Loader';
 import {
   Card,
   CardContent,
-  Typography,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  Paper,
-  Button,
-  TextField,
+  ImageList,
+  ImageListItem,
+  ImageListItemBar,
 } from '@material-ui/core';
 import { Add as AddIcon, Delete as DeleteIcon, Edit as EditIcon } from '@material-ui/icons';
 import { jsPDF } from 'jspdf';
 import 'jspdf-autotable';
 import Compressor from 'compressorjs';
 import heic2any from 'heic2any';
+
+
 
 const useStyles = makeStyles((theme) => ({
   root: {
@@ -49,35 +44,33 @@ const useStyles = makeStyles((theme) => ({
       flex: '1 0 auto',
       minWidth: '80px',
     },
-
     modal: {
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
-      modalContent: {
-        backgroundColor: theme.palette.background.paper,
-        border: '2px solid #000',
-        boxShadow: theme.shadows[5],
-        padding: theme.spacing(2, 4, 3),
-        maxWidth: '80%',
-        maxHeight: '80vh',
-        display: 'flex',
-        flexDirection: 'column',
-      },
-      modalImageContainer: {
-        flexGrow: 1,
-        overflowY: 'auto',
-        marginBottom: theme.spacing(2),
-      },
+    },
+    modalContent: {
+      backgroundColor: theme.palette.background.paper,
+      border: '2px solid #000',
+      boxShadow: theme.shadows[5],
+      padding: theme.spacing(2, 4, 3),
+      maxWidth: '80%',
+      maxHeight: '80vh',
+      display: 'flex',
+      flexDirection: 'column',
+    },
+    modalImageContainer: {
+      flexGrow: 1,
+      overflowY: 'auto',
+      marginBottom: theme.spacing(2),
+      padding: theme.spacing(2),
     },
     image: {
       width: '100%',
-      height: '100%',
+      height: 'auto',
       objectFit: 'cover',
     },
-    icon: {
-      color: 'rgba(255, 255, 255, 0.54)',
-    },
+    
     modalButtons: {
       marginTop: theme.spacing(2),
       textAlign: 'right',
@@ -87,13 +80,39 @@ const useStyles = makeStyles((theme) => ({
       justifyContent: 'center',
       alignItems: 'center',
       height: 200,
-      backgroundColor: '#f0f0f0',
-      color: '#888',
+      backgroundColor: '#f0f0f0',      color: '#888',
     },
-
+    imageList: {
+      padding: theme.spacing(2), // Add padding around the edge
+    },
+    imageListItem: {
+      position: 'relative',
+      '&:hover $imageOverlay': {
+        opacity: 1,
+      },
+    },
+    imageOverlay: {
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      backgroundColor: 'rgba(0, 0, 0, 0.5)',
+      opacity: 0,
+      transition: 'opacity 0.3s',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    icon: {
+      position: 'absolute',
+      top: 0,
+      right: 0,
+      color: 'rgba(255, 255, 255, 0.54)',
+    },
   },
-}));
-
+  }));
+  
 
 
 
@@ -565,19 +584,21 @@ const FlooringInstallationNotes = () => {
 
   const clearStorage = () => {
     const confirmClear = window.confirm('Are you sure you want to clear all data? This action cannot be undone.');
-    
+  
     if (confirmClear) {
       localStorage.removeItem('jobAddress');
       localStorage.removeItem('dateTime');
       localStorage.removeItem('flooringList');
-      localStorage.removeItem('uploadedImages');
+      localStorage.removeItem('uploadedImages'); // Assuming you store image data in localStorage
       setJobAddress('');
       setDateTime('');
       setFlooringList([]);
+  
+      // Clear IndexedDB images
       if (db) {
         const transaction = db.transaction(['images'], 'readwrite');
         const objectStore = transaction.objectStore('images');
-        objectStore.clear();
+        objectStore.clear(); // Clear all images from the 'images' store
       }
     }
   };
@@ -804,38 +825,24 @@ const FlooringInstallationNotes = () => {
       </Card>
     ))}
     
-    <Modal
-  className={classes.modal}
-  open={openModal}
-  onClose={handleCloseModal}
->
+    <Modal className={classes.modal} open={openModal} onClose={handleCloseModal}>
   <div className={classes.modalContent}>
     <Typography variant="h5" gutterBottom>
       Uploaded Images
     </Typography>
-    <div style={{ flexGrow: 1, overflowY: 'auto' }}>
-      <GridList cellHeight={200} cols={isMobileView ? 1 : 3} spacing={10}>
+    <div className={classes.modalImageContainer}>
+      <ImageList className={classes.imageList} cols={isMobileView ? 1 : 3} gap={8}>
         {uploadedImages.map((image, index) => (
-          <GridListTile key={index}>
-            {image ? (
-              <img src={image} alt={`Uploaded ${index}`} className={classes.image} />
-            ) : (
-              <div className={classes.fallbackImage}>Image not available</div>
-            )}
-            <GridListTileBar
-              title={`Image ${index + 1}`}
-              actionIcon={
-                <IconButton
-                  className={classes.icon}
-                  onClick={() => handleImageDelete(index)}
-                >
-                  <DeleteIcon />
-                </IconButton>
-              }
-            />
-          </GridListTile>
+          <ImageListItem key={index} className={classes.imageListItem}>
+            <img src={image} alt={`Uploaded ${index}`} loading="lazy" />
+            <div className={classes.imageOverlay}>
+              <IconButton onClick={() => handleImageDelete(index)}>
+                <DeleteIcon style={{ color: 'white' }} />
+              </IconButton>
+            </div>
+          </ImageListItem>
         ))}
-      </GridList>
+      </ImageList>
     </div>
     <div className={classes.modalButtons}>
       <Button variant="contained" color="primary" onClick={handleCloseModal}>
