@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Modal, IconButton, Typography, Button, TextField } from '@material-ui/core';
 import { makeStyles } from '@material-ui/core/styles';
-import { Grid } from '@material-ui/core';
+import { Grid, Switch, FormControlLabel } from '@material-ui/core';
 import Loader from './components/Loader';
 import {
   Card,
@@ -15,6 +15,7 @@ import { jsPDF } from 'jspdf';
 import 'jspdf-autotable';
 import Compressor from 'compressorjs';
 import heic2any from 'heic2any';
+
 
 
 
@@ -141,6 +142,8 @@ const useCurrentDateTime = () => {
 };
 
 const FlooringInstallationNotes = () => {
+  const [floorHeat, setFloorHeat] = useState(false);
+  const [linearDrain, setLinearDrain] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [db, setDb] = useState(null);
   const [isMobileView, setIsMobileView] = useState(false);
@@ -266,6 +269,8 @@ const FlooringInstallationNotes = () => {
     setDimensions(item.dimensions);
     setTotalSqFeet(item.totalSqFeet);
     setNotes(item.notes);
+    setFloorHeat(item.floorHeat); // Add this line
+    setLinearDrain(item.linearDrain); // Add this line
   };
 
   const [selectedImage, setSelectedImage] = useState(null);
@@ -411,8 +416,10 @@ const FlooringInstallationNotes = () => {
       dimensions,
       totalSqFeet,
       notes,
+      floorHeat, // Add this line
+      linearDrain, // Add this line
     };
-
+  
     if (editIndex === -1) {
       // Add new item
       const updatedList = [...flooringList, newItem];
@@ -426,15 +433,15 @@ const FlooringInstallationNotes = () => {
       localStorage.setItem('flooringList', JSON.stringify(updatedList));
       setEditIndex(-1);
     }
-
+  
     // Clear form fields
-  setArea('');
-  setSubArea('');
-  setSubSubArea('');
-  setDimensions([{ lengthFeet: '', lengthInches: '', widthFeet: '', widthInches: '' }]);
-  setTotalSqFeet(0);
-  setNotes('');
-};
+    setArea('');
+    setSubArea('');
+    setSubSubArea('');
+    setDimensions([{ lengthFeet: '', lengthInches: '', widthFeet: '', widthInches: '' }]);
+    setTotalSqFeet(0);
+    setNotes('');
+  };
 
   const handleDelete = (index) => {
     const updatedList = [...flooringList];
@@ -500,13 +507,15 @@ const FlooringInstallationNotes = () => {
         .map((dim) => `${dim.lengthFeet}' ${dim.lengthInches}" x ${dim.widthFeet}' ${dim.widthInches}"`)
         .join(', '),
       item.totalSqFeet,
+      item.floorHeat ? '•' : '', // Floor Heat
+      item.linearDrain ? '•' : '', // Linear Drain
       item.notes,
     ]);
   
     // Set table styles
     const tableConfig = {
       startY: 44,
-      head: [['Area / Floor', 'Sub Area', 'Sub-Sub Area', 'Dimensions', 'Total SF', 'Notes']],
+      head: [['Area / Floor', 'Sub Area', 'Sub-Sub Area', 'Dimensions', 'Total SF', 'H', 'LD', 'Notes']],
       body: tableData,
       headStyles: {
         fillColor: [128, 0, 128],
@@ -520,36 +529,36 @@ const FlooringInstallationNotes = () => {
     // Generate the table
     doc.autoTable(tableConfig);
   
-    //Add uploaded images as subsequent pages
-  for (let i = 0; i < uploadedImages.length; i++) {
-    const image = uploadedImages[i];
-    let imageData = image;
-
-    if (image.startsWith('data:image/heic')) {
-      try {
-        const blob = await fetch(image).then((res) => res.blob());
-        const convertedImage = await heic2any({
-          blob,
-          toType: 'image/jpeg',
-          quality: 0.8,
-        });
-        imageData = URL.createObjectURL(convertedImage);
-      } catch (error) {
-        console.error('Error converting HEIC image:', error);
-        continue;
+    // Add uploaded images as subsequent pages
+    for (let i = 0; i < uploadedImages.length; i++) {
+      const image = uploadedImages[i];
+      let imageData = image;
+  
+      if (image.startsWith('data:image/heic')) {
+        try {
+          const blob = await fetch(image).then((res) => res.blob());
+          const convertedImage = await heic2any({
+            blob,
+            toType: 'image/jpeg',
+            quality: 0.8,
+          });
+          imageData = URL.createObjectURL(convertedImage);
+        } catch (error) {
+          console.error('Error converting HEIC image:', error);
+          continue;
+        }
       }
+  
+      doc.addPage();
+      doc.addImage(imageData, 'JPEG', 10, 10, 190, 0, `image-${i}`);
     }
-
-    doc.addPage();
-    doc.addImage(imageData, 'JPEG', 10, 10, 190, 0, `image-${i}`);
-  }
-
-  // Generate the file name based on the job address
-  const fileName = `flooring_installation_notes_${jobAddress.replace(/\s+/g, '_')}.pdf`;
-
-  // Save the PDF with the generated file name
-  doc.save(fileName);
-};
+  
+    // Generate the file name based on the job address
+    const fileName = `flooring_installation_notes_${jobAddress.replace(/\s+/g, '_')}.pdf`;
+  
+    // Save the PDF with the generated file name
+    doc.save(fileName);
+  };
 
   const addToList = () => {
     const newItem = {
@@ -668,6 +677,20 @@ const FlooringInstallationNotes = () => {
                 margin="dense"
               />
             </Grid>
+
+            <Grid item xs={12}>
+  <FormControlLabel
+    control={<Switch checked={floorHeat} onChange={(e) => setFloorHeat(e.target.checked)} />}
+    label="Floor Heat"
+  />
+</Grid>
+<Grid item xs={12}>
+  <FormControlLabel
+    control={<Switch checked={linearDrain} onChange={(e) => setLinearDrain(e.target.checked)} />}
+    label="Linear Drain"
+  />
+</Grid>
+
             <Grid item xs={12}>
   {dimensions.map((dimension, index) => (
     <div key={index} className={classes.dimensionContainer}>
@@ -783,13 +806,19 @@ const FlooringInstallationNotes = () => {
       Flooring Installation List
     </Typography>
     {flooringList.map((item, index) => (
-      <Card key={index} className={classes.listItem}>
-        <CardContent>
+    <Card key={index} className={classes.listItem}>
+    <CardContent>
       <Typography variant="subtitle1" gutterBottom>
         <strong>Job Address / Name:</strong> {item.jobAddress}
       </Typography>
       <Typography variant="subtitle1" gutterBottom>
         <strong>Date / Time:</strong> {item.dateTime}
+      </Typography>
+      <Typography variant="subtitle1" gutterBottom>
+        <strong>Floor Heat:</strong> {item.floorHeat ? 'Yes' : 'No'}
+      </Typography>
+      <Typography variant="subtitle1" gutterBottom>
+        <strong>Linear Drain:</strong> {item.linearDrain ? 'Yes' : 'No'}
       </Typography>
       <Typography variant="subtitle1" gutterBottom>
         <strong>Area / Floor:</strong> {item.area}
